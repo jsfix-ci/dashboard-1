@@ -2,14 +2,31 @@
 import ResourceTable from '@shell/components/ResourceTable';
 import Loading from '@shell/components/Loading';
 import Masthead from './Masthead';
+import ResourceLoadingIndicator from './ResourceLoadingIndicator';
+import ResourceFetch, { TYPES_RESTRICTED } from '@shell/mixins/resource-fetch';
 
 export default {
   components: {
     Loading,
     ResourceTable,
-    Masthead
+    Masthead,
+    ResourceLoadingIndicator
   },
-
+  mixins: [ResourceFetch],
+  props:  {
+    hasAdvancedFiltering: {
+      type:    Boolean,
+      default: false
+    },
+    advFilterHideLabelsAsCols: {
+      type:    Boolean,
+      default: false
+    },
+    advFilterPreventFilteringLabels: {
+      type:    Boolean,
+      default: false
+    },
+  },
   async fetch() {
     const store = this.$store;
     const resource = this.resource;
@@ -33,6 +50,15 @@ export default {
       if ( component?.fetch ) {
         hasFetch = true;
       }
+
+      // If the custom component supports it, ask it what resources it loads, so we can
+      // use the incremental loading indicator when enabled
+      if (component?.$loadingResources) {
+        const { loadResources, loadIndeterminate } = component?.$loadingResources(this.$route, this.$store);
+
+        this.loadResources = loadResources;
+        this.loadIndeterminate = loadIndeterminate;
+      }
     }
 
     if ( !hasFetch ) {
@@ -42,7 +68,11 @@ export default {
         return;
       }
 
-      this.rows = await store.dispatch(`${ inStore }/findAll`, { type: resource });
+      if (TYPES_RESTRICTED.includes(resource)) {
+        this.rows = await this.$fetchType(resource);
+      } else {
+        this.rows = await store.dispatch(`${ inStore }/findAll`, { type: resource });
+      }
     }
   },
 
@@ -61,15 +91,22 @@ export default {
     const existingData = getters[`${ inStore }/all`](resource) || [];
 
     return {
+      inStore,
       schema,
       hasListComponent,
-      hasData:      existingData.length > 0,
-      showMasthead: showMasthead === undefined ? true : showMasthead,
+      hasData:           existingData.length > 0,
+      showMasthead:      showMasthead === undefined ? true : showMasthead,
       resource,
-
+      // manual refresh
+      manualRefreshInit: false,
+      watch:             false,
+      force:             false,
       // Provided by fetch later
       rows:              [],
       customTypeDisplay: null,
+      // incremental loading
+      loadResources:     [resource],
+      loadIndeterminate: false,
     };
   },
 
@@ -114,8 +151,17 @@ export default {
       :type-display="customTypeDisplay"
       :schema="schema"
       :resource="resource"
-    />
-
+    >
+      <template v-slot:header>
+        <ResourceLoadingIndicator
+          :resources="loadResources"
+          :indeterminate="loadIndeterminate"
+        />
+      </template>
+      <template slot="extraActions">
+        <slot name="extraActions"></slot>
+      </template>
+    </Masthead>
     <div v-if="hasListComponent">
       <component
         :is="listComponent"
@@ -129,6 +175,9 @@ export default {
       :loading="loading"
       :headers="headers"
       :group-by="groupBy"
+      :has-advanced-filtering="hasAdvancedFiltering"
+      :adv-filter-hide-labels-as-cols="advFilterHideLabelsAsCols"
+      :adv-filter-prevent-filtering-labels="advFilterPreventFilteringLabels"
     />
   </div>
 </template>

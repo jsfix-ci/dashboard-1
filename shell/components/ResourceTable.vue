@@ -17,11 +17,19 @@ export const defaultTableSortGenerationFn = (schema, $store) => {
   }
 
   const resource = schema.id;
+  let sortKey = resource;
+
   const inStore = $store.getters['currentStore'](resource);
   const generation = $store.getters[`${ inStore }/currentGeneration`]?.(resource);
 
   if ( generation ) {
-    return `${ resource }/${ generation }`;
+    sortKey += `/${ generation }`;
+  }
+
+  const nsFilterKey = $store.getters['activeNamespaceCacheKey'];
+
+  if ( nsFilterKey ) {
+    return `${ sortKey }/${ nsFilterKey }`;
   }
 };
 
@@ -109,7 +117,19 @@ export default {
     getCustomDetailLink: {
       type:    Function,
       default: null
-    }
+    },
+    hasAdvancedFiltering: {
+      type:    Boolean,
+      default: false
+    },
+    advFilterHideLabelsAsCols: {
+      type:    Boolean,
+      default: false
+    },
+    advFilterPreventFilteringLabels: {
+      type:    Boolean,
+      default: false
+    },
   },
 
   data() {
@@ -191,11 +211,12 @@ export default {
       const isVirtualProduct = this.$store.getters['currentProduct'].name === HARVESTER;
 
       // If the resources isn't namespaced or we want ALL of them, there's nothing to do.
-      if ( (!this.isNamespaced || isAll) && !isVirtualProduct) {
+      // If this is a harvester list, 'all' must still be filtered
+      if ( !this.isNamespaced || (isAll && !isVirtualProduct)) {
         return this.rows || [];
       }
 
-      const includedNamespaces = this.$store.getters['activeNamespaceCache']();
+      const includedNamespaces = this.$store.getters['namespaces']();
 
       // Shouldn't happen, but does for resources like management.cattle.io.preference
       if (!this.rows) {
@@ -345,7 +366,12 @@ export default {
 
     handleActionButtonClick(event) {
       this.$emit('clickedActionButton', event);
+    },
+
+    handleGroupValueChange(val) {
+      this._group = val;
     }
+
   }
 };
 </script>
@@ -358,6 +384,8 @@ export default {
     :rows="filteredRows"
     :loading="loading"
     :group-by="computedGroupBy"
+    :group="group"
+    :group-options="groupOptions"
     :search="search"
     :paging="true"
     :paging-params="pagingParams"
@@ -367,9 +395,13 @@ export default {
     :overflow-x="overflowX"
     :overflow-y="overflowY"
     :get-custom-detail-link="getCustomDetailLink"
+    :has-advanced-filtering="hasAdvancedFiltering"
+    :adv-filter-hide-labels-as-cols="advFilterHideLabelsAsCols"
+    :adv-filter-prevent-filtering-labels="advFilterPreventFilteringLabels"
     key-field="_key"
     :sort-generation-fn="safeSortGenerationFn"
     @clickedActionButton="handleActionButtonClick"
+    @group-value-change="handleGroupValueChange"
     v-on="$listeners"
   >
     <template v-if="showGrouping" #header-middle>

@@ -55,7 +55,7 @@ export default {
     return {
       groups:         [],
       gettingGroups:  false,
-      wantNavSync:    false
+      wantNavSync:    false,
     };
   },
 
@@ -70,7 +70,7 @@ export default {
     afterLoginRoute: mapPref(AFTER_LOGIN_ROUTE),
 
     namespaces() {
-      return this.$store.getters['activeNamespaceCache']();
+      return this.$store.getters['activeNamespaceCache'];
     },
 
     dev:            mapPref(DEV),
@@ -331,7 +331,9 @@ export default {
       let namespaces = null;
 
       if ( !this.$store.getters['isAllNamespaces'] ) {
-        namespaces = Object.keys(this.namespaces);
+        const namespacesObject = this.$store.getters['namespaces']();
+
+        namespaces = Object.keys(namespacesObject);
       }
 
       // Always show cluster-level types, regardless of the namespace filter
@@ -540,8 +542,8 @@ export default {
 <template>
   <div class="dashboard-root">
     <FixedBanner :header="true" />
-    <AwsComplianceBanner />
-    <AzureWarning />
+    <AwsComplianceBanner v-if="managementReady" />
+    <AzureWarning v-if="managementReady" />
     <div v-if="managementReady" class="dashboard-content">
       <Header />
       <nav v-if="clusterReady" class="side-nav">

@@ -13,8 +13,10 @@ import {
   MANAGEMENT,
   NORMAN,
   SCHEMA,
-  DEFAULT_WORKSPACE
+  DEFAULT_WORKSPACE,
+  SECRET
 } from '@shell/config/types';
+import { ELEMENTAL_SCHEMA_IDS, KIND, ELEMENTAL_CLUSTER_PROVIDER } from '@shell/config/elemental-types';
 import { _CREATE, _EDIT, _VIEW } from '@shell/config/query-params';
 
 import { findBy, removeObject, clear } from '@shell/utils/array';
@@ -53,6 +55,8 @@ import { LEGACY } from '@shell/store/features';
 import semver from 'semver';
 import { canViewClusterMembershipEditor } from '@shell/components/form/Members/ClusterMembershipEditor.vue';
 import { SETTING } from '@shell/config/settings';
+import { base64Encode } from '@shell/utils/crypto';
+import { CAPI as CAPI_ANNOTATIONS } from '@shell/config/labels-annotations';
 import ACE from './ACE';
 import AgentEnv from './AgentEnv';
 import DrainOptions from './DrainOptions';
@@ -328,6 +332,10 @@ export default {
       return this.value.spec.rkeConfig;
     },
 
+    isElementalCluster() {
+      return this.provider === ELEMENTAL_CLUSTER_PROVIDER || this.value?.machineProvider?.toLowerCase() === KIND.MACHINE_INV_SELECTOR_TEMPLATES.toLowerCase();
+    },
+
     advancedTitleAlt() {
       const machineSelectorLength = this.rkeConfig.machineSelectorConfig.length;
 
@@ -406,7 +414,7 @@ export default {
       const showK3s = allValidK3sVersions.length && !existingRke2;
       const out = [];
 
-      if ( showRke2 ) {
+      if ( showRke2 && !this.isElementalCluster ) {
         if ( showK3s ) {
           out.push({ kind: 'group', label: this.t('cluster.provider.rke2') });
         }
@@ -549,7 +557,7 @@ export default {
     },
 
     showCisProfile() {
-      return this.provider === 'custom' && ( this.serverArgs.profile || this.agentArgs.profile );
+      return (this.provider === 'custom' || this.isElementalCluster) && ( this.serverArgs.profile || this.agentArgs.profile );
     },
 
     registryOptions() {
@@ -562,7 +570,7 @@ export default {
     },
 
     needCredential() {
-      if ( this.provider === 'custom' || this.provider === 'import' || this.mode === _VIEW ) {
+      if ( this.provider === 'custom' || this.provider === 'import' || this.isElementalCluster || this.mode === _VIEW ) {
         return false;
       }
 
@@ -582,11 +590,17 @@ export default {
     },
 
     machineConfigSchema() {
+      let schemaAddress;
+
       if ( !this.hasMachinePools ) {
         return null;
+      } else if (this.isElementalCluster) {
+        schemaAddress = ELEMENTAL_SCHEMA_IDS.MACHINE_INV_SELECTOR_TEMPLATES;
+      } else {
+        schemaAddress = `${ CAPI.MACHINE_CONFIG_GROUP }.${ this.provider }config`;
       }
 
-      const schema = this.$store.getters['management/schemaFor'](`${ CAPI.MACHINE_CONFIG_GROUP }.${ this.provider }config`);
+      const schema = this.$store.getters['management/schemaFor'](schemaAddress);
 
       return schema;
     },
@@ -758,6 +772,7 @@ export default {
     defaultVersion() {
       const all = this.versionOptions.filter(x => !!x.value);
       const first = all[0]?.value;
+
       const preferred = all.find(x => x.value === this.defaultRke2)?.value;
 
       const rke2 = this.getAllOptionsAfterMinVersion(this.rke2Versions, null);
@@ -928,8 +943,17 @@ export default {
 
       if ( existing?.length ) {
         for ( const pool of existing ) {
-          const type = `${ CAPI.MACHINE_CONFIG_GROUP }.${ pool.machineConfigRef.kind.toLowerCase() }`;
+          let type;
+
+          if (this.isElementalCluster) {
+            type = ELEMENTAL_SCHEMA_IDS.MACHINE_INV_SELECTOR_TEMPLATES;
+          } else {
+            type = `${ CAPI.MACHINE_CONFIG_GROUP }.${ pool.machineConfigRef.kind.toLowerCase() }`;
+          }
+
+          const id = `pool${ ++this.lastIdx }`;
           let config;
+          let configMissing = false;
 
           if ( this.$store.getters['management/canList'](type) ) {
             try {
@@ -938,12 +962,14 @@ export default {
                 id: `${ this.value.metadata.namespace }/${ pool.machineConfigRef.name }`,
               });
             } catch (e) {
-              // Some users can't see the config, that's ok.
+              // Some users can't see the config, that's ok. we will display a banner for a 404
+              if (e?.status === 404) {
+                if (this.isElementalCluster) {
+                  configMissing = true;
+                }
+              }
             }
           }
-
-          // @TODO what if the pool is missing?
-          const id = `pool${ ++this.lastIdx }`;
 
           out.push({
             id,
@@ -952,6 +978,7 @@ export default {
             update: true,
             pool:    clone(pool),
             config:  config ? await this.$store.dispatch('management/clone', { resource: config }) : null,
+            configMissing
           });
         }
       }
@@ -960,7 +987,7 @@ export default {
     },
 
     async addMachinePool(idx) {
-      if ( !this.machineConfigSchema ) {
+      if ( !this.machineConfigSchema && !this.isElementalCluster ) {
         return;
       }
 
@@ -999,6 +1026,11 @@ export default {
       if (this.provider === 'vmwarevsphere') {
         pool.pool.machineOS = 'linux';
       }
+
+      if (this.isElementalCluster) {
+        pool.pool.machineConfigRef.apiVersion = 'elemental.cattle.io/v1beta1';
+      }
+
       this.machinePools.push(pool);
 
       this.$nextTick(() => {
@@ -1100,7 +1132,7 @@ export default {
     },
 
     validationPassed() {
-      return (this.provider === 'custom' || !!this.credentialId);
+      return (this.provider === 'custom' || this.isElementalCluster || !!this.credentialId);
     },
 
     cancelCredential() {
@@ -1112,7 +1144,7 @@ export default {
     done() {
       let routeName = 'c-cluster-product-resource';
 
-      if ( this.mode === _CREATE && (this.provider === 'import' || this.provider === 'custom') ) {
+      if ( this.mode === _CREATE && (this.provider === 'import' || this.provider === 'custom' || this.isElementalCluster) ) {
         // Go show the registration command
         routeName = 'c-cluster-product-resource-namespace-id';
       }
@@ -1199,12 +1231,29 @@ export default {
           },
         });
 
-        set(this.agentConfig, 'cloud-provider-config', res.data);
+        const kubeconfig = res.data;
+
+        const harvesterKubeconfigSecret = await this.createKubeconfigSecret(kubeconfig);
+
+        set(this.agentConfig, 'cloud-provider-config', `secret://fleet-default:${ harvesterKubeconfigSecret?.metadata?.name }`);
         set(this.chartValues, `${ HARVESTER_CLOUD_PROVIDER }.clusterName`, this.value.metadata.name);
         set(this.chartValues, `${ HARVESTER_CLOUD_PROVIDER }.cloudConfigPath`, '/var/lib/rancher/rke2/etc/config-files/cloud-provider-config');
       }
 
       await this.save(btnCb);
+    },
+    // create a secret to reference the harvester cluster kubeconfig in rkeConfig
+    async createKubeconfigSecret(kubeconfig = '') {
+      const clusterName = this.value.metadata.name;
+      const secret = await this.$store.dispatch('management/create', {
+        type:     SECRET,
+        metadata: {
+          namespace: 'fleet-default', generateName: 'harvesterconfig', annotations: { [CAPI_ANNOTATIONS.SECRET_AUTH]: clusterName, [CAPI_ANNOTATIONS.SECRET_WILL_DELETE]: 'true' }
+        },
+        data: { credential: base64Encode(kubeconfig) }
+      });
+
+      return secret.save({ url: '/v1/secrets', method: 'POST' });
     },
 
     cancel() {
@@ -1639,7 +1688,7 @@ export default {
             </Tab>
           </template>
           <div v-if="!unremovedMachinePools.length">
-            You do not have any machine pools defined, click the plus to add one.
+            {{ t('cluster.machinePool.noPoolsDisclaimer') }}
           </div>
         </Tabbed>
         <div class="spacer" />

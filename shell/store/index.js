@@ -70,13 +70,19 @@ const getActiveNamespaces = (state, getters) => {
   }
 
   if ( product.showWorkspaceSwitcher ) {
-    return { [workspace]: true };
+    const fleetOut = { [workspace]: true };
+
+    updateActiveNamespaceCache(state, fleetOut);
+
+    return fleetOut;
   }
 
   const inStore = product?.inStore;
   const clusterId = getters['currentCluster']?.id;
 
   if ( !clusterId || !inStore ) {
+    updateActiveNamespaceCache(state, out);
+
     return out;
   }
 
@@ -124,29 +130,50 @@ const getActiveNamespaces = (state, getters) => {
       }
     }
   }
+  // Create map that can be used to efficiently check if a
+  // resource should be displayed
+  updateActiveNamespaceCache(state, out);
 
   return out;
 };
 
+const updateActiveNamespaceCache = (state, activeNamespaceCache) => {
+  // This is going to run a lot, so keep it optimised
+  let cacheKey = '';
+
+  for (const key in activeNamespaceCache) {
+    // I though array.join would be faster than string concatenation, but in places like this where the array must first be constructed it's
+    // slower.
+    cacheKey += key + activeNamespaceCache[key];
+  }
+
+  // Only update `activeNamespaceCache` if there have been changes. This reduces a lot of churn
+  if (state.activeNamespaceCacheKey !== cacheKey) {
+    state.activeNamespaceCacheKey = cacheKey;
+    state.activeNamespaceCache = activeNamespaceCache;
+  }
+};
+
 export const state = () => {
   return {
-    managementReady:      false,
-    clusterReady:         false,
-    isMultiCluster:       false,
-    isRancher:            false,
-    namespaceFilters:     [],
-    activeNamespaceCache: {}, // Used to efficiently check if a resource should be displayed
-    allNamespaces:        null,
-    allWorkspaces:        null,
-    clusterId:            null,
-    productId:            null,
-    workspace:            null,
-    error:                null,
-    cameFromError:        false,
-    pageActions:          [],
-    serverVersion:        null,
-    systemNamespaces:     [],
-    isSingleProduct:      undefined,
+    managementReady:         false,
+    clusterReady:            false,
+    isMultiCluster:          false,
+    isRancher:               false,
+    namespaceFilters:        [],
+    activeNamespaceCache:    {}, // Used to efficiently check if a resource should be displayed
+    activeNamespaceCacheKey: '', // Fingerprint of activeNamespaceCache
+    allNamespaces:           null,
+    allWorkspaces:           null,
+    clusterId:               null,
+    productId:               null,
+    workspace:               null,
+    error:                   null,
+    cameFromError:           false,
+    pageActions:             [],
+    serverVersion:           null,
+    systemNamespaces:        [],
+    isSingleProduct:         undefined,
   };
 };
 
@@ -327,15 +354,15 @@ export const getters = {
     // updateNamespaces mutation. We use this map to filter workloads
     // as we don't want to recompute the active namespaces
     // for each workload in a list.
-    return () => {
-      return state.activeNamespaceCache;
-    };
+    return state.activeNamespaceCache;
+  },
+
+  activeNamespaceCacheKey(state) {
+    return state.activeNamespaceCacheKey;
   },
 
   activeNamespaceFilters(state) {
-    return () => {
-      return state.namespaceFilters;
-    };
+    return state.namespaceFilters;
   },
 
   namespaces(state, getters) {
@@ -354,7 +381,7 @@ export const getters = {
     }
 
     const inStore = product.inStore;
-    const filteredMap = getters['activeNamespaceCache']();
+    const filteredMap = getters['activeNamespaceCache'];
     const isAll = getters['isAllNamespaces'];
     const all = getters[`${ inStore }/all`](NAMESPACE).map(x => x.id);
     let out;
@@ -493,14 +520,14 @@ export const mutations = {
 
     // Create map that can be used to efficiently check if a
     // resource should be displayed
-    state.activeNamespaceCache = getActiveNamespaces(state, getters);
+    getActiveNamespaces(state, getters);
   },
 
   pageActions(state, pageActions) {
     state.pageActions = pageActions;
   },
 
-  updateWorkspace(state, { value, all }) {
+  updateWorkspace(state, { value, all, getters }) {
     if ( all ) {
       state.allWorkspaces = all;
 
@@ -515,6 +542,8 @@ export const mutations = {
     }
 
     state.workspace = value;
+
+    getActiveNamespaces(state, getters);
   },
 
   clusterId(state, neu) {
@@ -650,6 +679,7 @@ export const actions = {
       commit('updateWorkspace', {
         value: getters['prefs/get'](WORKSPACE),
         all:   res.workspaces,
+        getters
       });
     }
 

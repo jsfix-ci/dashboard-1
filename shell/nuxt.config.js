@@ -453,6 +453,13 @@ export default function(dir, _appConfig) {
           },
         });
 
+        // Ensure there is a fallback for browsers that don't support web workers
+        config.module.rules.unshift({
+          test:    /web-worker.[a-z-]+.js/i,
+          loader:  'worker-loader',
+          options: { inline: 'fallback' },
+        });
+
         // Prevent warning in log with the md files in the content folder
         config.module.rules.push({
           test:    /\.md$/,
@@ -563,6 +570,7 @@ export default function(dir, _appConfig) {
       path.join(NUXT_SHELL, 'plugins/trim-whitespace'),
       { src: path.join(NUXT_SHELL, 'plugins/extend-router') },
       { src: path.join(NUXT_SHELL, 'plugins/lookup'), ssr: false },
+      { src: path.join(NUXT_SHELL, 'plugins/console'), ssr: false },
       { src: path.join(NUXT_SHELL, 'plugins/int-number'), ssr: false },
       { src: path.join(NUXT_SHELL, 'plugins/nuxt-client-init'), ssr: false },
       path.join(NUXT_SHELL, 'plugins/replaceall'),
@@ -573,27 +581,28 @@ export default function(dir, _appConfig) {
 
     // Proxy: https://github.com/nuxt-community/proxy-module#options
     proxy: {
-      '/k8s':          proxyWsOpts(api), // Straight to a remote cluster (/k8s/clusters/<id>/)
-      '/pp':           proxyWsOpts(api), // For (epinio) standalone API
-      '/api':          proxyWsOpts(api), // Management k8s API
-      '/apis':         proxyWsOpts(api), // Management k8s API
-      '/v1':           proxyWsOpts(api), // Management Steve API
-      '/v3':           proxyWsOpts(api), // Rancher API
-      '/v3-public':    proxyOpts(api), // Rancher Unauthed API
-      '/api-ui':       proxyOpts(api), // Browser API UI
-      '/meta':         proxyMetaOpts(api), // Browser API UI
-      '/v1-*':         proxyOpts(api), // SAML, KDM, etc
+      '/k8s':                    proxyWsOpts(api), // Straight to a remote cluster (/k8s/clusters/<id>/)
+      '/pp':                     proxyWsOpts(api), // For (epinio) standalone API
+      '/api':                    proxyWsOpts(api), // Management k8s API
+      '/apis':                   proxyWsOpts(api), // Management k8s API
+      '/v1':                     proxyWsOpts(api), // Management Steve API
+      '/v3':                     proxyWsOpts(api), // Rancher API
+      '/v3-public':              proxyOpts(api), // Rancher Unauthed API
+      '/api-ui':                 proxyOpts(api), // Browser API UI
+      '/meta':                   proxyMetaOpts(api), // Browser API UI
+      '/v1-*':                   proxyOpts(api), // SAML, KDM, etc
+      '/elemental/registration': proxyOpts(api), // For grabbing elemental machine registration blob for download
       // These are for Ember embedding
-      '/c/*/edit':     proxyOpts('https://127.0.0.1:8000'), // Can't proxy all of /c because that's used by Vue too
-      '/k/':           proxyOpts('https://127.0.0.1:8000'),
-      '/g/':           proxyOpts('https://127.0.0.1:8000'),
-      '/n/':           proxyOpts('https://127.0.0.1:8000'),
-      '/p/':           proxyOpts('https://127.0.0.1:8000'),
-      '/assets':       proxyOpts('https://127.0.0.1:8000'),
-      '/translations': proxyOpts('https://127.0.0.1:8000'),
-      '/engines-dist': proxyOpts('https://127.0.0.1:8000'),
+      '/c/*/edit':               proxyOpts('https://127.0.0.1:8000'), // Can't proxy all of /c because that's used by Vue too
+      '/k/':                     proxyOpts('https://127.0.0.1:8000'),
+      '/g/':                     proxyOpts('https://127.0.0.1:8000'),
+      '/n/':                     proxyOpts('https://127.0.0.1:8000'),
+      '/p/':                     proxyOpts('https://127.0.0.1:8000'),
+      '/assets':                 proxyOpts('https://127.0.0.1:8000'),
+      '/translations':           proxyOpts('https://127.0.0.1:8000'),
+      '/engines-dist':           proxyOpts('https://127.0.0.1:8000'),
       // Plugin dev
-      '/verdaccio/':   proxyOpts('http://127.0.0.1:4873/-'),
+      '/verdaccio/':             proxyOpts('http://127.0.0.1:4873/-'),
     },
 
     // Nuxt server
